@@ -4,6 +4,42 @@ const app = express();
 const stripe = require('stripe')('sk_test_51KL5zGIpVBORLBeN5WMZXOUGUPc4LeqNmF8bdV9AlCNP4xBabkXQwV1M7IpbuBXwvL9e1WdtA41oZzK9ZA45xY25009CTzYFUt');
 
 
+const customers = {
+  // stripeCustomerId : data
+  'customer001': {
+    apiKey: '123xyzCponpiqnfpi1nf',
+    active: false,
+    itemId: 'si_L190VMWm1kB7TQ',
+  },
+};
+
+const apiKeys = {
+  // apiKey : customerdata
+  '123xyzCponpiqnfpi1nf': 'customer001',
+};
+
+function generateAPIKey() {
+  const { randomBytes } = require('crypto');
+  const apiKey = randomBytes(16).toString('hex');
+  const hashedAPIKey = hashAPIKey(apiKey);
+
+  // Ensure API key is unique
+  if (apiKeys[hashedAPIKey]) {
+    generateAPIKey();
+  } else {
+    return { hashedAPIKey, apiKey };
+  }
+}
+
+// Hash the API key
+function hashAPIKey(apiKey) {
+  const { createHash } = require('crypto');
+
+  const hashedAPIKey = createHash('sha256').update(apiKey).digest('hex');
+
+  return hashedAPIKey;
+}
+
 // Parsing rawBody required by stripe webhook
 app.use(
   express.json({
@@ -12,11 +48,36 @@ app.use(
 );
 
 // the serving api endpoint
-app.get('/api', (req, res) => {
+app.get('/api', async (req, res) => {
   // apiKey Store in header like X-Api-Key is better
   const apiKey = req.query.apiKey;
 
-  res.send({ data: 'nah, here\' your wheather data.'})
+  
+  if (!apiKey) {
+    res.sendStatus(400); // bad request
+  }
+
+  const hashedAPIKey = hashAPIKey(apiKey);
+
+  const customerId = apiKeys[hashedAPIKey];
+  const customer = customers[customerId];
+
+  if (!customer || !customer.active) {
+    res.sendStatus(403); // not authorized
+  } else {
+
+    // Record usage with Stripe Billing
+    const record = await stripe.subscriptionItems.createUsageRecord(
+      customer.itemId,
+      {
+        quantity: 1,
+        timestamp: 'now',
+        action: 'increment',
+      }
+    );
+
+    res.send({ data: 'nah, here\' your wheather data.',usage: record})
+  }
 });
 
 // subscribing endpoint
@@ -117,6 +178,17 @@ app.post('/webhook', async(req,res)=>{
 
   res.sendStatus(200);
 
+});
+
+// Get information about the customer
+app.get('/customers/:id', (req, res) => {
+  const customerId = req.params.id;
+  const account = customers[customerId];
+  if (account) {
+    res.send(account);
+  } else {
+    res.sendStatus(404);
+  }
 });
 
 
